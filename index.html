@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Certificación Energética · Panel de mediciones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  :root{
+    --bg:#10151a;
+    --panel:#182029;
+    --panel-2:#1e2830;
+    --border:#2a363f;
+    --text:#e7e4dd;
+    --text-muted:#8a97a0;
+    --copper:#c17a45;
+    --copper-soft:rgba(193,122,69,0.15);
+    --teal:#3fc7b8;
+    --teal-soft:rgba(63,199,184,0.15);
+    --red:#e1594f;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(1200px 600px at 85% -10%, rgba(63,199,184,0.06), transparent),
+      radial-gradient(900px 500px at -10% 10%, rgba(193,122,69,0.08), transparent),
+      var(--bg);
+    color:var(--text);
+    font-family:'Inter',system-ui,sans-serif;
+    min-height:100vh;
+    padding:28px 24px 60px;
+  }
+  .wrap{max-width:1180px;margin:0 auto;}
+
+  /* Top bar */
+  .topbar{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:28px;}
+  .brand{display:flex;flex-direction:column;gap:4px;}
+  .brand .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--teal);}
+  .brand h1{font-family:'Space Grotesk',sans-serif;font-size:22px;margin:0;font-weight:600;letter-spacing:-0.01em;}
+  .status-badge{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);padding:8px 14px;border-radius:999px;font-size:12.5px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 3px var(--teal-soft);}
+  .dot.offline{background:var(--red);box-shadow:0 0 0 3px rgba(225,89,79,0.15);animation:none;}
+  .dot.pulse{animation:pulse 2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+
+  /* Hero readout */
+  .hero{
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:28px 32px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:24px;
+    margin-bottom:22px;
+    position:relative;
+    overflow:hidden;
+  }
+  .hero::before{
+    content:'';
+    position:absolute;inset:0;
+    background-image:repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 34px);
+    pointer-events:none;
+  }
+  .hero-readout{position:relative;}
+  .hero-readout .label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;}
+  .hero-readout .value{font-family:'JetBrains Mono',monospace;font-size:56px;font-weight:700;line-height:1;color:var(--copper);letter-spacing:-0.01em;}
+  .hero-readout .value sup{font-size:20px;color:var(--text-muted);font-weight:400;margin-left:6px;}
+  .hero-sub{position:relative;display:flex;gap:28px;flex-wrap:wrap;}
+  .hero-sub .item{text-align:right;}
+  .hero-sub .item .label{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px;}
+  .hero-sub .item .val{font-family:'JetBrains Mono',monospace;font-size:19px;color:var(--text);font-weight:500;}
+
+  /* Stat cards */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px;}
+  .stat-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;}
+  .stat-card .label{font-size:12px;color:var(--text-muted);margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+  .stat-card .label .swatch{width:8px;height:8px;border-radius:2px;}
+  .stat-card .num{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:600;}
+  .stat-card .unit{font-size:13px;color:var(--text-muted);font-weight:400;margin-left:3px;}
+
+  /* Section shell */
+  .section{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;margin-bottom:22px;}
+  .section-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
+  .section-head h2{font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:600;margin:0;}
+  .pill-group{display:flex;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:999px;padding:3px;}
+  .pill{border:none;background:transparent;color:var(--text-muted);font-size:12px;font-family:'Inter',sans-serif;padding:6px 12px;border-radius:999px;cursor:pointer;transition:all .15s;}
+  .pill.active{background:var(--copper-soft);color:var(--copper);font-weight:600;}
+  .chart-holder{height:280px;position:relative;}
+
+  /* Blockchain chain strip */
+  .chain-strip{display:flex;gap:0;overflow-x:auto;padding:6px 2px 10px;}
+  .chain-block{
+    flex:0 0 auto;
+    min-width:150px;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:12px 14px;
+    margin-right:22px;
+    position:relative;
+  }
+  .chain-block::after{
+    content:'';
+    position:absolute;
+    top:50%;right:-22px;
+    width:22px;height:1px;
+    background:repeating-linear-gradient(90deg, var(--teal) 0 4px, transparent 4px 8px);
+    transform:translateY(-50%);
+  }
+  .chain-block:last-child::after{display:none;}
+  .chain-block .bnum{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--teal);margin-bottom:6px;}
+  .chain-block .hash{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);word-break:break-all;margin-bottom:8px;}
+  .chain-block .meta{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:var(--text-muted);}
+  .verified-tag{display:inline-flex;align-items:center;gap:4px;color:var(--teal);}
+  .verified-tag::before{content:'✓';font-weight:700;}
+
+  /* Table */
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{text-align:left;font-family:'JetBrains Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);padding:8px 10px;border-bottom:1px solid var(--border);}
+  tbody td{padding:10px;border-bottom:1px solid rgba(255,255,255,0.04);font-family:'JetBrains Mono',monospace;color:var(--text);}
+  tbody tr:hover{background:rgba(255,255,255,0.02);}
+  .hash-cell{display:flex;align-items:center;gap:8px;color:var(--text-muted);}
+  .copy-btn{background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;padding:2px 7px;border-radius:5px;cursor:pointer;font-family:'Inter',sans-serif;}
+  .copy-btn:hover{color:var(--teal);border-color:var(--teal);}
+  .state-ok{color:var(--teal);}
+  .state-pending{color:var(--copper);}
+
+  .empty{color:var(--text-muted);font-size:13px;text-align:center;padding:30px 0;}
+  .footnote{font-size:11.5px;color:var(--text-muted);margin-top:6px;font-family:'JetBrains Mono',monospace;}
+
+  @media (max-width:820px){
+    .stats{grid-template-columns:repeat(2,1fr);}
+    .hero{flex-direction:column;align-items:flex-start;}
+  }
+  @media (max-width:520px){
+    .stats{grid-template-columns:1fr 1fr;}
+    .hero-readout .value{font-size:42px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <span class="eyebrow">Proyecto de certificación energética</span>
+      <h1>Panel de mediciones on-chain</h1>
+    </div>
+    <div class="status-badge">
+      <span class="dot pulse" id="connDot"></span>
+      <span id="connText">Conectando con la API…</span>
+    </div>
+  </div>
+
+  <!-- Hero: lectura en tiempo real -->
+  <div class="hero">
+    <div class="hero-readout">
+      <div class="label">Potencia instantánea</div>
+      <div class="value" id="heroPower">--<sup>W</sup></div>
+    </div>
+    <div class="hero-sub">
+      <div class="item"><div class="label">Dispositivo</div><div class="val" id="heroDevice">—</div></div>
+      <div class="item"><div class="label">Última lectura</div><div class="val" id="heroTime">—</div></div>
+      <div class="item"><div class="label">Bloque</div><div class="val" id="heroBlock">—</div></div>
+    </div>
+  </div>
+
+  <!-- Tarjetas de estadísticas -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label"><span class="swatch" style="background:var(--copper)"></span>Voltaje</div>
+      <div class="num" id="statVoltage">--<span class="unit">V</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label"><span class="swatch" style="background:var(--teal)"></span>Corriente</div>
+      <div class="num" id="statCurrent">--<span class="unit">A</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label"><span class="swatch" style="background:#d9a441"></span>Energía acumulada</div>
+      <div class="num" id="statEnergy">--<span class="unit">kWh</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label"><span class="swatch" style="background:#7f8fa6"></span>Temperatura</div>
+      <div class="num" id="statTemp">--<span class="unit">°C</span></div>
+    </div>
+  </div>
+
+  <!-- Gráfica histórica -->
+  <div class="section">
+    <div class="section-head">
+      <h2>Histórico de mediciones</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <div class="pill-group" id="metricPills">
+          <button class="pill active" data-metric="power">Potencia</button>
+          <button class="pill" data-metric="voltage">Voltaje</button>
+          <button class="pill" data-metric="current">Corriente</button>
+          <button class="pill" data-metric="temperature">Temperatura</button>
+        </div>
+        <div class="pill-group" id="rangePills">
+          <button class="pill" data-range="1">1h</button>
+          <button class="pill active" data-range="24">24h</button>
+          <button class="pill" data-range="168">7d</button>
+        </div>
+      </div>
+    </div>
+    <div class="chart-holder"><canvas id="historyChart"></canvas></div>
+  </div>
+
+  <!-- Cadena de verificación -->
+  <div class="section">
+    <div class="section-head"><h2>Últimos bloques verificados</h2></div>
+    <div class="chain-strip" id="chainStrip">
+      <div class="empty">Cargando bloques…</div>
+    </div>
+  </div>
+
+  <!-- Tabla de mediciones -->
+  <div class="section">
+    <div class="section-head"><h2>Registro de mediciones</h2></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha / hora</th>
+          <th>Voltaje</th>
+          <th>Corriente</th>
+          <th>Potencia</th>
+          <th>Energía</th>
+          <th>Temp.</th>
+          <th>Tx hash</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr><td colspan="8" class="empty">Cargando mediciones…</td></tr>
+      </tbody>
+    </table>
+    <div class="footnote">Mostrando las últimas 25 mediciones.</div>
+  </div>
+
+</div>
+
+<script>
+/* =========================================================
+   CONFIGURACIÓN — apunta esto a tu backend
+   ========================================================= */
+const API_BASE = 'http://localhost:4000/api'; // cambia por la URL real de tu API
+const POLL_MS = 5000; // frecuencia de refresco "tiempo real"
+
+let currentMetric = 'power';
+let currentRangeHours = 24;
+let historyChart;
+
+const METRIC_META = {
+  power:       { label: 'Potencia (W)',      color: '#c17a45' },
+  voltage:     { label: 'Voltaje (V)',       color: '#d9a441' },
+  current:     { label: 'Corriente (A)',     color: '#3fc7b8' },
+  temperature: { label: 'Temperatura (°C)',  color: '#7f8fa6' },
+};
+
+function fmt(n, decimals = 1) {
+  if (n === null || n === undefined || Number.isNaN(n)) return '--';
+  return Number(n).toFixed(decimals);
+}
+
+function shortHash(h) {
+  if (!h) return 'pendiente…';
+  return h.slice(0, 8) + '…' + h.slice(-6);
+}
+
+function timeAgoOrDate(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+async function apiGet(path) {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (!res.ok) throw new Error(`API ${path} -> ${res.status}`);
+  return res.json();
+}
+
+function setConnState(ok) {
+  const dot = document.getElementById('connDot');
+  const text = document.getElementById('connText');
+  if (ok) {
+    dot.classList.remove('offline');
+    dot.classList.add('pulse');
+    text.textContent = 'API conectada · actualizando';
+  } else {
+    dot.classList.add('offline');
+    dot.classList.remove('pulse');
+    text.textContent = 'Sin conexión con la API';
+  }
+}
+
+/* ---------- Hero + tarjetas de estadísticas (últimas lecturas) ---------- */
+async function refreshLatest() {
+  try {
+    const [latest] = await apiGet('/measurements/latest?limit=1');
+    setConnState(true);
+    if (!latest) return;
+
+    document.getElementById('heroPower').innerHTML = `${fmt(latest.power, 0)}<sup>W</sup>`;
+    document.getElementById('heroDevice').textContent = latest.deviceId || '—';
+    document.getElementById('heroTime').textContent = timeAgoOrDate(latest.timestamp);
+    document.getElementById('heroBlock').textContent = latest.blockNumber ? `#${latest.blockNumber}` : '—';
+
+    document.getElementById('statVoltage').innerHTML = `${fmt(latest.voltage)}<span class="unit">V</span>`;
+    document.getElementById('statCurrent').innerHTML = `${fmt(latest.current, 2)}<span class="unit">A</span>`;
+    document.getElementById('statEnergy').innerHTML = `${fmt(latest.energy, 2)}<span class="unit">kWh</span>`;
+    document.getElementById('statTemp').innerHTML = `${fmt(latest.temperature)}<span class="unit">°C</span>`;
+  } catch (err) {
+    console.error(err);
+    setConnState(false);
+  }
+}
+
+/* ---------- Tabla de mediciones ---------- */
+async function refreshTable() {
+  try {
+    const rows = await apiGet('/measurements/latest?limit=25');
+    const body = document.getElementById('tableBody');
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="8" class="empty">Aún no hay mediciones registradas.</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map(r => `
+      <tr>
+        <td>${timeAgoOrDate(r.timestamp)}</td>
+        <td>${fmt(r.voltage)} V</td>
+        <td>${fmt(r.current, 2)} A</td>
+        <td>${fmt(r.power, 0)} W</td>
+        <td>${fmt(r.energy, 2)} kWh</td>
+        <td>${fmt(r.temperature)} °C</td>
+        <td>
+          <div class="hash-cell">
+            <span>${shortHash(r.txHash)}</span>
+            ${r.txHash ? `<button class="copy-btn" onclick="navigator.clipboard.writeText('${r.txHash}')">copiar</button>` : ''}
+          </div>
+        </td>
+        <td class="${r.verified ? 'state-ok' : 'state-pending'}">${r.verified ? '✓ verificado' : '… pendiente'}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+/* ---------- Cadena de bloques verificados ---------- */
+async function refreshChain() {
+  try {
+    const rows = await apiGet('/measurements/latest?limit=6');
+    const strip = document.getElementById('chainStrip');
+    const verified = rows.filter(r => r.txHash);
+    if (!verified.length) {
+      strip.innerHTML = '<div class="empty">Todavía no hay bloques verificados.</div>';
+      return;
+    }
+    strip.innerHTML = verified.reverse().map(r => `
+      <div class="chain-block">
+        <div class="bnum">Bloque ${r.blockNumber ?? '—'}</div>
+        <div class="hash">${shortHash(r.txHash)}</div>
+        <div class="meta">
+          <span>${new Date(r.timestamp).toLocaleTimeString('es-MX')}</span>
+          <span class="verified-tag">verificado</span>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+/* ---------- Gráfica histórica ---------- */
+async function refreshChart() {
+  try {
+    const from = new Date(Date.now() - currentRangeHours * 3600 * 1000).toISOString();
+    const rows = await apiGet(`/measurements?from=${from}&limit=2000`);
+    const meta = METRIC_META[currentMetric];
+
+    const labels = rows.map(r => new Date(r.timestamp));
+    const data = rows.map(r => r[currentMetric]);
+
+    if (historyChart) {
+      historyChart.data.labels = labels;
+      historyChart.data.datasets[0].data = data;
+      historyChart.data.datasets[0].label = meta.label;
+      historyChart.data.datasets[0].borderColor = meta.color;
+      historyChart.data.datasets[0].backgroundColor = meta.color + '22';
+      historyChart.update();
+      return;
+    }
+
+    const ctx = document.getElementById('historyChart').getContext('2d');
+    historyChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: meta.label,
+          data,
+          borderColor: meta.color,
+          backgroundColor: meta.color + '22',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: {
+            type: 'time',
+            time: { unit: currentRangeHours <= 1 ? 'minute' : (currentRangeHours <= 24 ? 'hour' : 'day') },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+            ticks: { color: '#8a97a0', font: { family: 'JetBrains Mono', size: 10 } }
+          },
+          y: {
+            grid: { color: 'rgba(255,255,255,0.04)' },
+            ticks: { color: '#8a97a0', font: { family: 'JetBrains Mono', size: 10 } }
+          }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+/* ---------- Controles ---------- */
+document.getElementById('metricPills').addEventListener('click', (e) => {
+  if (!e.target.dataset.metric) return;
+  document.querySelectorAll('#metricPills .pill').forEach(p => p.classList.remove('active'));
+  e.target.classList.add('active');
+  currentMetric = e.target.dataset.metric;
+  refreshChart();
+});
+
+document.getElementById('rangePills').addEventListener('click', (e) => {
+  if (!e.target.dataset.range) return;
+  document.querySelectorAll('#rangePills .pill').forEach(p => p.classList.remove('active'));
+  e.target.classList.add('active');
+  currentRangeHours = Number(e.target.dataset.range);
+  refreshChart();
+});
+
+/* ---------- Arranque ---------- */
+function tick() {
+  refreshLatest();
+  refreshTable();
+  refreshChain();
+}
+tick();
+refreshChart();
+setInterval(tick, POLL_MS);
+</script>
+</body>
+</html>
