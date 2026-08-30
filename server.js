@@ -207,6 +207,31 @@ async function medidoresPermitidos(req) {
   return rows.map((r) => r.id);
 }
 
+// Trae un mapa { medidor_id: serial } desde energia_relacional (bases distintas, no se puede hacer JOIN directo)
+async function mapaSeriales() {
+  const { rows } = await poolRelacional.query("SELECT id, serial FROM medidores");
+  const mapa = {};
+  rows.forEach((m) => { mapa[m.id] = m.serial; });
+  return mapa;
+}
+
+// Convierte una fila de 'lecturas' + el mapa de seriales al formato que espera el dashboard
+function normalizeLectura(r, mapa) {
+  return {
+    id: `${r.medidor_id}-${new Date(r.tiempo).getTime()}`,
+    deviceId: mapa[r.medidor_id] || String(r.medidor_id),
+    timestamp: r.tiempo instanceof Date ? r.tiempo.toISOString() : r.tiempo,
+    voltage: r.voltaje,
+    current: r.corriente,
+    power: r.potencia,
+    energy: r.energia_kwh,
+    temperature: r.temperatura,
+    txHash: r.tx_hash,
+    blockNumber: r.block_number,
+    verified: !!r.tx_hash,
+  };
+}
+
 // ── GET /api/measurements/latest?limit=25 ────────────────────────
 app.get("/api/measurements/latest", requireAuth, async (req, res) => {
   try {
@@ -220,11 +245,11 @@ app.get("/api/measurements/latest", requireAuth, async (req, res) => {
     const filtroSQL = permitidos !== null ? "WHERE medidor_id = ANY($2)" : "";
     const params = permitidos !== null ? [limit, permitidos] : [limit];
 
-    const { rows } = await poolSeries.query(
-      `SELECT * FROM lecturas ${filtroSQL} ORDER BY tiempo DESC LIMIT $1`,
-      params
-    );
-    res.json(rows);
+    const [{ rows }, mapa] = await Promise.all([
+      poolSeries.query(`SELECT * FROM lecturas ${filtroSQL} ORDER BY tiempo DESC LIMIT $1`, params),
+      mapaSeriales(),
+    ]);
+    res.json(rows.map((r) => normalizeLectura(r, mapa)));
   } catch (err) {
     console.error("Error en /api/measurements/latest:", err);
     res.status(500).json({ error: "Error al consultar las mediciones" });
@@ -260,11 +285,11 @@ app.get("/api/measurements", requireAuth, async (req, res) => {
     const whereSQL = condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "";
     params.push(limit);
 
-    const { rows } = await poolSeries.query(
-      `SELECT * FROM lecturas ${whereSQL} ORDER BY tiempo ASC LIMIT $${i}`,
-      params
-    );
-    res.json(rows);
+    const [{ rows }, mapa] = await Promise.all([
+      poolSeries.query(`SELECT * FROM lecturas ${whereSQL} ORDER BY tiempo ASC LIMIT $${i}`, params),
+      mapaSeriales(),
+    ]);
+    res.json(rows.map((r) => normalizeLectura(r, mapa)));
   } catch (err) {
     console.error("Error en /api/measurements:", err);
     res.status(500).json({ error: "Error al consultar las mediciones" });
@@ -339,4 +364,3 @@ app.listen(PORT, () => {
   console.log(`Dashboard disponible en http://localhost:${PORT}/`);
   console.log(`API disponible en http://localhost:${PORT}/api`);
 });
-// migrador mongo db a neon
