@@ -36,17 +36,80 @@
     padding:28px 24px 60px;
   }
   .wrap{max-width:1180px;margin:0 auto;}
+  .hidden{display:none !important;}
+
+  /* Login screen */
+  .login-screen{
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:fixed;
+    inset:0;
+    background:var(--bg);
+    z-index:100;
+  }
+  .login-card{
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:36px 40px;
+    width:100%;
+    max-width:360px;
+  }
+  .login-card .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--teal);margin-bottom:6px;display:block;}
+  .login-card h1{font-family:'Space Grotesk',sans-serif;font-size:20px;margin:0 0 24px;font-weight:600;}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:0.06em;}
+  .field input{
+    width:100%;
+    background:var(--bg);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:11px 12px;
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    font-size:14px;
+  }
+  .field input:focus{outline:none;border-color:var(--teal);}
+  .login-btn{
+    width:100%;
+    background:var(--copper);
+    border:none;
+    border-radius:8px;
+    padding:12px;
+    color:#10151a;
+    font-weight:600;
+    font-size:14px;
+    cursor:pointer;
+    margin-top:6px;
+  }
+  .login-btn:hover{opacity:0.9;}
+  .login-error{color:var(--red);font-size:13px;margin-top:12px;text-align:center;min-height:16px;}
 
   /* Top bar */
   .topbar{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:28px;}
   .brand{display:flex;flex-direction:column;gap:4px;}
   .brand .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--teal);}
   .brand h1{font-family:'Space Grotesk',sans-serif;font-size:22px;margin:0;font-weight:600;letter-spacing:-0.01em;}
+  .topbar-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .user-chip{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);padding:8px 14px;border-radius:999px;font-size:12.5px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);}
+  .user-chip .rol-tag{background:var(--teal-soft);color:var(--teal);padding:2px 8px;border-radius:999px;font-size:10.5px;text-transform:uppercase;letter-spacing:0.04em;}
+  .logout-btn{background:none;border:1px solid var(--border);color:var(--text-muted);font-size:12px;padding:8px 12px;border-radius:999px;cursor:pointer;font-family:'Inter',sans-serif;}
+  .logout-btn:hover{color:var(--red);border-color:var(--red);}
   .status-badge{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);padding:8px 14px;border-radius:999px;font-size:12.5px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);}
   .dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 3px var(--teal-soft);}
   .dot.offline{background:var(--red);box-shadow:0 0 0 3px rgba(225,89,79,0.15);animation:none;}
   .dot.pulse{animation:pulse 2s infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+
+  /* Device selector (solo aparece si hay más de un medidor visible) */
+  .device-select-wrap{margin-bottom:18px;display:flex;align-items:center;gap:10px;}
+  .device-select-wrap label{font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:0.06em;}
+  .device-select-wrap select{
+    background:var(--panel);border:1px solid var(--border);color:var(--text);
+    padding:8px 12px;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:13px;
+  }
 
   /* Hero readout */
   .hero{
@@ -147,17 +210,52 @@
 </style>
 </head>
 <body>
-<div class="wrap">
+
+<!-- ═══════════ PANTALLA DE LOGIN ═══════════ -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <span class="eyebrow">Certificación energética</span>
+    <h1>Iniciar sesión</h1>
+    <form id="loginForm">
+      <div class="field">
+        <label for="loginUser">Usuario</label>
+        <input type="text" id="loginUser" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="loginPass">Contraseña</label>
+        <input type="password" id="loginPass" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="login-btn">Entrar</button>
+      <div class="login-error" id="loginError"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════════ DASHBOARD (oculto hasta iniciar sesión) ═══════════ -->
+<div class="wrap hidden" id="dashboard">
 
   <div class="topbar">
     <div class="brand">
       <span class="eyebrow">Proyecto de certificación energética</span>
       <h1>Panel de mediciones on-chain</h1>
     </div>
-    <div class="status-badge">
-      <span class="dot pulse" id="connDot"></span>
-      <span id="connText">Conectando con la API…</span>
+    <div class="topbar-right">
+      <div class="status-badge">
+        <span class="dot pulse" id="connDot"></span>
+        <span id="connText">Conectando con la API…</span>
+      </div>
+      <div class="user-chip">
+        <span id="userName">—</span>
+        <span class="rol-tag" id="userRol">—</span>
+      </div>
+      <button class="logout-btn" id="logoutBtn">Cerrar sesión</button>
     </div>
+  </div>
+
+  <!-- Selector de dispositivo: solo aparece si el rol ve más de un medidor -->
+  <div class="device-select-wrap hidden" id="deviceSelectWrap">
+    <label for="deviceSelect">Vivienda / medidor</label>
+    <select id="deviceSelect"></select>
   </div>
 
   <!-- Hero: lectura en tiempo real -->
@@ -249,14 +347,15 @@
 
 <script>
 /* =========================================================
-   CONFIGURACIÓN — apunta esto a tu backend
+   CONFIGURACIÓN
    ========================================================= */
 const API_BASE = '/api'; // ruta relativa: funciona en local y en producción (Render)
-const POLL_MS = 5000; // frecuencia de refresco "tiempo real"
+const POLL_MS = 5000;
 
 let currentMetric = 'power';
 let currentRangeHours = 24;
 let historyChart;
+let sesionActual = null; // { id, username, rol, vivienda_id }
 
 const METRIC_META = {
   power:       { label: 'Potencia (W)',      color: '#c17a45' },
@@ -266,7 +365,7 @@ const METRIC_META = {
 };
 
 function fmt(n, decimals = 1) {
-  if (n === null || n === undefined || Number.isNaN(n)) return '--';
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return '--';
   return Number(n).toFixed(decimals);
 }
 
@@ -281,10 +380,27 @@ function timeAgoOrDate(ts) {
   return d.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'medium' });
 }
 
+/* ---------- Fetch con cookie de sesión incluida ---------- */
 async function apiGet(path) {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
+  if (res.status === 401) {
+    mostrarLogin('Tu sesión expiró, inicia sesión de nuevo.');
+    throw new Error('401');
+  }
   if (!res.ok) throw new Error(`API ${path} -> ${res.status}`);
   return res.json();
+}
+
+async function apiPost(path, body) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `API ${path} -> ${res.status}`);
+  return data;
 }
 
 function setConnState(ok) {
@@ -299,6 +415,57 @@ function setConnState(ok) {
     dot.classList.remove('pulse');
     text.textContent = 'Sin conexión con la API';
   }
+}
+
+/* ---------- Login / logout ---------- */
+function mostrarLogin(mensajeError) {
+  document.getElementById('dashboard').classList.add('hidden');
+  document.getElementById('loginScreen').classList.remove('hidden');
+  document.getElementById('loginError').textContent = mensajeError || '';
+  sesionActual = null;
+}
+
+function mostrarDashboard() {
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('dashboard').classList.remove('hidden');
+  document.getElementById('userName').textContent = sesionActual.username;
+  document.getElementById('userRol').textContent = sesionActual.rol;
+}
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value;
+  document.getElementById('loginError').textContent = '';
+  try {
+    const data = await apiPost('/login', { username, password });
+    sesionActual = data.usuario;
+    mostrarDashboard();
+    arrancarDashboard();
+  } catch (err) {
+    document.getElementById('loginError').textContent = err.message === 'Failed to fetch'
+      ? 'No se pudo contactar al servidor.'
+      : (err.message || 'Usuario o contraseña incorrectos');
+  }
+});
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  try { await apiPost('/logout', {}); } catch (_) {}
+  clearInterval(pollHandle);
+  mostrarLogin('');
+});
+
+async function verificarSesionExistente() {
+  try {
+    const res = await fetch(`${API_BASE}/me`, { credentials: 'include' });
+    if (res.ok) {
+      sesionActual = await res.json();
+      mostrarDashboard();
+      arrancarDashboard();
+      return;
+    }
+  } catch (_) { /* sin conexión o sin sesión: se queda en login */ }
+  mostrarLogin('');
 }
 
 /* ---------- Hero + tarjetas de estadísticas (últimas lecturas) ---------- */
@@ -318,8 +485,7 @@ async function refreshLatest() {
     document.getElementById('statEnergy').innerHTML = `${fmt(latest.energy, 2)}<span class="unit">kWh</span>`;
     document.getElementById('statTemp').innerHTML = `${fmt(latest.temperature)}<span class="unit">°C</span>`;
   } catch (err) {
-    console.error(err);
-    setConnState(false);
+    if (err.message !== '401') { console.error(err); setConnState(false); }
   }
 }
 
@@ -350,7 +516,7 @@ async function refreshTable() {
       </tr>
     `).join('');
   } catch (err) {
-    console.error(err);
+    if (err.message !== '401') console.error(err);
   }
 }
 
@@ -375,7 +541,7 @@ async function refreshChain() {
       </div>
     `).join('');
   } catch (err) {
-    console.error(err);
+    if (err.message !== '401') console.error(err);
   }
 }
 
@@ -437,8 +603,24 @@ async function refreshChart() {
       }
     });
   } catch (err) {
-    console.error(err);
+    if (err.message !== '401') console.error(err);
   }
+}
+
+/* ---------- Selector de dispositivo (solo admin/supervisor con varios medidores) ---------- */
+async function configurarSelectorDispositivo() {
+  const wrap = document.getElementById('deviceSelectWrap');
+  if (sesionActual.rol === 'usuario') {
+    wrap.classList.add('hidden'); // el usuario ya ve solo lo suyo, no necesita elegir
+    return;
+  }
+  try {
+    const estados = await apiGet('/estado');
+    if (estados.length <= 1) { wrap.classList.add('hidden'); return; }
+    const select = document.getElementById('deviceSelect');
+    select.innerHTML = estados.map(e => `<option value="${e.serial}">${e.serial} — ${e.direccion || 'sin dirección'}</option>`).join('');
+    wrap.classList.remove('hidden');
+  } catch (_) { /* si falla, simplemente no se muestra el selector */ }
 }
 
 /* ---------- Controles ---------- */
@@ -459,14 +641,20 @@ document.getElementById('rangePills').addEventListener('click', (e) => {
 });
 
 /* ---------- Arranque ---------- */
+let pollHandle;
 function tick() {
   refreshLatest();
   refreshTable();
   refreshChain();
 }
-tick();
-refreshChart();
-setInterval(tick, POLL_MS);
+function arrancarDashboard() {
+  configurarSelectorDispositivo();
+  tick();
+  refreshChart();
+  pollHandle = setInterval(tick, POLL_MS);
+}
+
+verificarSesionExistente();
 </script>
 </body>
 </html>
