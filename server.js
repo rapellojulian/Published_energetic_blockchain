@@ -32,6 +32,7 @@ const poolRelacional = new Pool({ connectionString: DATABASE_URL_RELACIONAL, ssl
 const poolSeries = new Pool({ connectionString: DATABASE_URL_SERIES, ssl: { rejectUnauthorized: false } });
 
 const app = express();
+app.set("trust proxy", 1); // necesario en Render: confía en el proxy para saber que la conexión es HTTPS
 app.use(cors({ origin: true, credentials: true })); // credentials: true para que las cookies viajen
 app.use(express.json());
 
