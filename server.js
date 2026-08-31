@@ -134,8 +134,8 @@ app.get("/api/me", requireAuth, (req, res) => {
 // GESTIÓN DE USUARIOS (solo administrador)
 // ══════════════════════════════════════════════════════════════
 
-// Listar todos los usuarios
-app.get("/api/usuarios", requireAuth, requireRole(["administrador"]), async (req, res) => {
+// Listar todos los usuarios (administrador y supervisor pueden ver; solo administrador puede crear)
+app.get("/api/usuarios", requireAuth, requireRole(["administrador", "supervisor"]), async (req, res) => {
   try {
     const { rows } = await poolRelacional.query(
       `SELECT u.id, u.username, r.nombre AS rol, v.direccion, m.serial, u.creado_en
@@ -339,15 +339,45 @@ app.get("/api/estado", requireAuth, async (req, res) => {
     const filtroSQL = permitidos !== null ? "WHERE e.medidor_id = ANY($1)" : "";
     const params = permitidos !== null ? [permitidos] : [];
 
-    const { rows } = await poolRelacional.query(
-      `SELECT e.*, m.serial, v.direccion
-       FROM estado_actual e
-       JOIN medidores m ON e.medidor_id = m.id
-       JOIN viviendas v ON m.vivienda_id = v.id
-       ${filtroSQL}`,
-      params
-    );
-    res.json(rows);
+    const [{ rows }, { rows: diarios }, { rows: mensuales }] = await Promise.all([
+      poolRelacional.query(
+        `SELECT e.*, m.serial, v.direccion
+         FROM estado_actual e
+         JOIN medidores m ON e.medidor_id = m.id
+         JOIN viviendas v ON m.vivienda_id = v.id
+         ${filtroSQL}`,
+        params
+      ),
+      // Energía acumulada del día: el ESP32 manda un total acumulado (no un delta),
+      // así que el consumo de hoy = (acumulado más reciente de hoy) - (acumulado más antiguo de hoy).
+      poolSeries.query(
+        `SELECT medidor_id, COALESCE(MAX(energia_kwh) - MIN(energia_kwh), 0) AS energia_acumulada
+         FROM lecturas
+         WHERE tiempo >= date_trunc('day', now())
+         GROUP BY medidor_id`
+      ),
+      // Mismo cálculo, pero desde el día 1 del mes actual.
+      poolSeries.query(
+        `SELECT medidor_id, COALESCE(MAX(energia_kwh) - MIN(energia_kwh), 0) AS consumo_mensual
+         FROM lecturas
+         WHERE tiempo >= date_trunc('month', now())
+         GROUP BY medidor_id`
+      ),
+    ]);
+
+    const mapaDiario = {};
+    diarios.forEach((d) => { mapaDiario[d.medidor_id] = Number(d.energia_acumulada); });
+
+    const mapaMensual = {};
+    mensuales.forEach((m) => { mapaMensual[m.medidor_id] = Number(m.consumo_mensual); });
+
+    const conCalculos = rows.map((r) => ({
+      ...r,
+      energia_acumulada: mapaDiario[r.medidor_id] ?? 0,
+      consumo_mensual: mapaMensual[r.medidor_id] ?? 0,
+    }));
+
+    res.json(conCalculos);
   } catch (err) {
     console.error("Error en /api/estado:", err);
     res.status(500).json({ error: "Error al consultar el estado actual" });
@@ -357,6 +387,44 @@ app.get("/api/estado", requireAuth, async (req, res) => {
 // ── GET /api/health ────────────────────────────────────────────
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, db: ["energia_relacional", "energia_series"] });
+});
+
+// ── GET /api/historico-mensual ───────────────────────────────────
+// Consumo de cada mes por separado (no solo el actual), calculado
+// igual que consumo_mensual: resta entre el acumulado más reciente
+// y el más antiguo dentro de cada mes. Nada se pierde porque 'lecturas'
+// nunca borra datos viejos.
+app.get("/api/historico-mensual", requireAuth, async (req, res) => {
+  try {
+    const permitidos = await medidoresPermitidos(req);
+    if (permitidos !== null && permitidos.length === 0) {
+      return res.json([]);
+    }
+
+    const filtroSQL = permitidos !== null ? "WHERE medidor_id = ANY($1)" : "";
+    const params = permitidos !== null ? [permitidos] : [];
+
+    const { rows } = await poolSeries.query(
+      `SELECT medidor_id,
+              date_trunc('month', tiempo) AS mes,
+              MAX(energia_kwh) - MIN(energia_kwh) AS consumo
+       FROM lecturas
+       ${filtroSQL}
+       GROUP BY medidor_id, date_trunc('month', tiempo)
+       ORDER BY medidor_id, mes DESC`,
+      params
+    );
+
+    const mapa = await mapaSeriales();
+    res.json(rows.map((r) => ({
+      deviceId: mapa[r.medidor_id] || String(r.medidor_id),
+      mes: r.mes,
+      consumo: Number(r.consumo),
+    })));
+  } catch (err) {
+    console.error("Error en /api/historico-mensual:", err);
+    res.status(500).json({ error: "Error al consultar el histórico mensual" });
+  }
 });
 
 // ── Arranque ─────────────────────────────────────────────────────
