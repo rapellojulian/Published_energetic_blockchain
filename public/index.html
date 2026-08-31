@@ -476,7 +476,7 @@ async function verificarSesionExistente() {
   mostrarLogin('');
 }
 
-/* ---------- Hero + tarjetas de estadísticas (últimas lecturas) ---------- */
+/* ---------- Hero + tarjetas instantáneas (últimas lecturas) ---------- */
 async function refreshLatest() {
   try {
     const [latest] = await apiGet('/measurements/latest?limit=1');
@@ -490,10 +490,57 @@ async function refreshLatest() {
 
     document.getElementById('statVoltage').innerHTML = `${fmt(latest.voltage)}<span class="unit">V</span>`;
     document.getElementById('statCurrent').innerHTML = `${fmt(latest.current, 2)}<span class="unit">A</span>`;
-    document.getElementById('statEnergy').innerHTML = `${fmt(latest.energy, 2)}<span class="unit">kWh</span>`;
     document.getElementById('statTemp').innerHTML = `${fmt(latest.temperature)}<span class="unit">°C</span>`;
+    // Nota: "Consumo de hoy" (statEnergy) y las tarjetas de mes YA NO se llenan aquí.
+    // latest.energy es el valor crudo de una sola lectura (un total corriendo tipo
+    // odómetro), no el consumo del día — el cálculo correcto (resta dentro del período)
+    // lo hace el servidor en /api/estado y /api/historico-mensual. Ver refreshEstado().
   } catch (err) {
     if (err.message !== '401') { console.error(err); setConnState(false); }
+  }
+}
+
+/* ---------- Tarjetas de consumo: hoy, mes actual y mes anterior ----------
+   Estas SÍ vienen calculadas correctamente por el servidor:
+   - /api/estado          -> energia_acumulada (hoy) y consumo_mensual (mes actual)
+   - /api/historico-mensual -> consumo de cada mes por separado, de ahí sacamos "mes anterior"
+*/
+async function refreshEstado() {
+  try {
+    const estados = await apiGet('/estado');
+    if (!estados.length) return;
+
+    // ¿Cuál vivienda mostrar? Si hay selector visible (admin/supervisor con
+    // varios medidores), usamos la que esté elegida. Si no, es un usuario
+    // normal y /api/estado ya le devuelve solo la suya.
+    const wrap = document.getElementById('deviceSelectWrap');
+    let objetivo;
+    if (!wrap.classList.contains('hidden')) {
+      const serialElegido = document.getElementById('deviceSelect').value;
+      objetivo = estados.find((e) => e.serial === serialElegido) || estados[0];
+    } else {
+      objetivo = estados[0];
+    }
+    if (!objetivo) return;
+
+    document.getElementById('statEnergy').innerHTML =
+      `${fmt(objetivo.energia_acumulada, 2)}<span class="unit">kWh</span>`;
+    document.getElementById('statMesActual').innerHTML =
+      `${fmt(objetivo.consumo_mensual, 2)}<span class="unit">kWh</span>`;
+
+    // Mes anterior no viene en /api/estado (ese solo trae el mes en curso),
+    // así que lo sacamos del histórico completo, filtrando por este medidor.
+    const historico = await apiGet('/historico-mensual');
+    const delMedidor = historico
+      .filter((h) => h.deviceId === objetivo.serial)
+      .sort((a, b) => new Date(b.mes) - new Date(a.mes)); // más reciente primero
+
+    const mesAnterior = delMedidor[1]; // [0] = mes actual, [1] = el anterior
+    document.getElementById('statMesAnterior').innerHTML = mesAnterior
+      ? `${fmt(mesAnterior.consumo, 2)}<span class="unit">kWh</span>`
+      : `—<span class="unit">kWh</span>`; // todavía no hay un mes anterior completo registrado
+  } catch (err) {
+    if (err.message !== '401') console.error(err);
   }
 }
 
@@ -648,15 +695,23 @@ document.getElementById('rangePills').addEventListener('click', (e) => {
   refreshChart();
 });
 
+// Cuando el admin/supervisor cambia de vivienda en el desplegable,
+// solo las tarjetas de consumo (hoy / mes / mes anterior) necesitan
+// refrescarse con los datos de esa vivienda.
+document.getElementById('deviceSelect').addEventListener('change', () => {
+  refreshEstado();
+});
+
 /* ---------- Arranque ---------- */
 let pollHandle;
 function tick() {
   refreshLatest();
+  refreshEstado();
   refreshTable();
   refreshChain();
 }
-function arrancarDashboard() {
-  configurarSelectorDispositivo();
+async function arrancarDashboard() {
+  await configurarSelectorDispositivo();
   tick();
   refreshChart();
   pollHandle = setInterval(tick, POLL_MS);
