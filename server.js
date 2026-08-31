@@ -19,6 +19,11 @@ const { Pool } = require("pg");
 const PORT = process.env.PORT || 4000;
 const SESSION_SECRET = process.env.SESSION_SECRET || "cambia-este-secreto-en-produccion";
 
+// Zona horaria de referencia para "día actual" y "mes actual".
+// Sin esto, Postgres calcula esos límites en UTC, y en Colombia (UTC-5)
+// eso hace que "el día" cambie a las 7:00 p.m. hora local en vez de a medianoche.
+const ZONA_HORARIA_LOCAL = "America/Bogota";
+
 const DATABASE_URL_RELACIONAL = process.env.DATABASE_URL_RELACIONAL;
 const DATABASE_URL_SERIES = process.env.DATABASE_URL_SERIES;
 
@@ -188,6 +193,64 @@ app.post("/api/usuarios", requireAuth, requireRole(["administrador"]), async (re
 });
 
 // ══════════════════════════════════════════════════════════════
+// VIVIENDAS (solo administrador) — usadas por el panel "Crear usuario"
+// del dashboard, para no depender de SQL manual en Neon.
+// ══════════════════════════════════════════════════════════════
+
+// Listar viviendas (con su medidor, si tiene) para el desplegable "vivienda existente"
+app.get("/api/viviendas", requireAuth, requireRole(["administrador"]), async (req, res) => {
+  try {
+    const { rows } = await poolRelacional.query(
+      `SELECT v.id, v.direccion, m.serial
+       FROM viviendas v
+       LEFT JOIN medidores m ON m.vivienda_id = v.id
+       ORDER BY v.id DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("Error en /api/viviendas:", err);
+    res.status(500).json({ error: "Error al consultar las viviendas" });
+  }
+});
+
+// Crear una vivienda nueva junto con su medidor, en una sola transacción
+// (equivalente a los dos INSERT que antes hacíamos a mano por SQL).
+app.post("/api/viviendas", requireAuth, requireRole(["administrador"]), async (req, res) => {
+  const { direccion, serial } = req.body;
+  if (!direccion || !serial) {
+    return res.status(400).json({ error: "Faltan direccion o serial" });
+  }
+
+  const cliente = await poolRelacional.connect();
+  try {
+    await cliente.query("BEGIN");
+
+    const { rows: viviendaRows } = await cliente.query(
+      "INSERT INTO viviendas (direccion) VALUES ($1) RETURNING id",
+      [direccion]
+    );
+    const viviendaId = viviendaRows[0].id;
+
+    await cliente.query(
+      "INSERT INTO medidores (vivienda_id, serial) VALUES ($1, $2)",
+      [viviendaId, serial]
+    );
+
+    await cliente.query("COMMIT");
+    res.status(201).json({ ok: true, vivienda_id: viviendaId, serial });
+  } catch (err) {
+    await cliente.query("ROLLBACK");
+    if (err.code === "23505") { // serial duplicado
+      return res.status(409).json({ error: "Ese serial de medidor ya existe" });
+    }
+    console.error("Error en POST /api/viviendas:", err);
+    res.status(500).json({ error: "Error al crear la vivienda/medidor" });
+  } finally {
+    cliente.release();
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // MEDICIONES
 // Reglas de acceso:
 //  - usuario: solo su propia vivienda/medidor
@@ -350,17 +413,19 @@ app.get("/api/estado", requireAuth, async (req, res) => {
       ),
       // Energía acumulada del día: el ESP32 manda un total acumulado (no un delta),
       // así que el consumo de hoy = (acumulado más reciente de hoy) - (acumulado más antiguo de hoy).
+      // Usamos AT TIME ZONE dos veces para que "el día" empiece a medianoche en hora
+      // de Colombia, no a medianoche UTC (que en Colombia cae a las 7:00 p.m.).
       poolSeries.query(
         `SELECT medidor_id, COALESCE(MAX(energia_kwh) - MIN(energia_kwh), 0) AS energia_acumulada
          FROM lecturas
-         WHERE tiempo >= date_trunc('day', now())
+         WHERE tiempo >= (date_trunc('day', now() AT TIME ZONE '${ZONA_HORARIA_LOCAL}') AT TIME ZONE '${ZONA_HORARIA_LOCAL}')
          GROUP BY medidor_id`
       ),
-      // Mismo cálculo, pero desde el día 1 del mes actual.
+      // Mismo cálculo, pero desde el día 1 del mes actual (también en hora de Colombia).
       poolSeries.query(
         `SELECT medidor_id, COALESCE(MAX(energia_kwh) - MIN(energia_kwh), 0) AS consumo_mensual
          FROM lecturas
-         WHERE tiempo >= date_trunc('month', now())
+         WHERE tiempo >= (date_trunc('month', now() AT TIME ZONE '${ZONA_HORARIA_LOCAL}') AT TIME ZONE '${ZONA_HORARIA_LOCAL}')
          GROUP BY medidor_id`
       ),
     ]);
@@ -393,7 +458,8 @@ app.get("/api/health", (req, res) => {
 // Consumo de cada mes por separado (no solo el actual), calculado
 // igual que consumo_mensual: resta entre el acumulado más reciente
 // y el más antiguo dentro de cada mes. Nada se pierde porque 'lecturas'
-// nunca borra datos viejos.
+// nunca borra datos viejos. Los meses se agrupan en hora de Colombia
+// (mismo motivo que en /api/estado: evitar el desfase de UTC).
 app.get("/api/historico-mensual", requireAuth, async (req, res) => {
   try {
     const permitidos = await medidoresPermitidos(req);
@@ -406,11 +472,11 @@ app.get("/api/historico-mensual", requireAuth, async (req, res) => {
 
     const { rows } = await poolSeries.query(
       `SELECT medidor_id,
-              date_trunc('month', tiempo) AS mes,
+              date_trunc('month', tiempo AT TIME ZONE '${ZONA_HORARIA_LOCAL}') AS mes,
               MAX(energia_kwh) - MIN(energia_kwh) AS consumo
        FROM lecturas
        ${filtroSQL}
-       GROUP BY medidor_id, date_trunc('month', tiempo)
+       GROUP BY medidor_id, date_trunc('month', tiempo AT TIME ZONE '${ZONA_HORARIA_LOCAL}')
        ORDER BY medidor_id, mes DESC`,
       params
     );
