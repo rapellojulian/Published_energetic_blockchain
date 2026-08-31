@@ -72,6 +72,18 @@
     font-size:14px;
   }
   .field input:focus{outline:none;border-color:var(--teal);}
+  .field select{
+    width:100%;
+    background:var(--bg);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:11px 12px;
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    font-size:14px;
+  }
+  .field select:focus{outline:none;border-color:var(--teal);}
+  .form-ok{color:var(--teal);font-size:13px;margin-top:4px;min-height:16px;font-family:'JetBrains Mono',monospace;}
   .login-btn{
     width:100%;
     background:var(--copper);
@@ -349,6 +361,74 @@
       </tbody>
     </table>
     <div class="footnote">Mostrando las últimas 25 mediciones.</div>
+  </div>
+
+  <!-- Panel de administración: crear usuario nuevo (solo administrador) -->
+  <div class="section hidden" id="adminSection">
+    <div class="section-head"><h2>Crear usuario nuevo</h2></div>
+
+    <form id="crearUsuarioForm" style="display:flex;flex-direction:column;gap:14px;max-width:480px;">
+      <div class="field">
+        <label for="nuevoUsername">Username</label>
+        <input type="text" id="nuevoUsername" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="nuevoPassword">Contraseña</label>
+        <input type="text" id="nuevoPassword" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="nuevoRol">Rol</label>
+        <select id="nuevoRol">
+          <option value="usuario">usuario</option>
+          <option value="administrador">administrador</option>
+          <option value="supervisor">supervisor</option>
+        </select>
+      </div>
+
+      <!-- Estos campos solo aplican si el rol elegido es "usuario" -->
+      <div id="viviendaFields">
+        <div class="field">
+          <label for="viviendaModo">Vivienda</label>
+          <select id="viviendaModo">
+            <option value="existente">Usar una vivienda existente</option>
+            <option value="nueva">Crear vivienda nueva (con su medidor)</option>
+          </select>
+        </div>
+
+        <div class="field" id="viviendaExistenteWrap">
+          <label for="viviendaExistente">Elegir vivienda</label>
+          <select id="viviendaExistente"></select>
+        </div>
+
+        <div class="hidden" id="viviendaNuevaWrap">
+          <div class="field">
+            <label for="nuevaDireccion">Dirección de la vivienda nueva</label>
+            <input type="text" id="nuevaDireccion" placeholder="Ej. Vivienda 2">
+          </div>
+          <div class="field">
+            <label for="nuevoSerial">Serial del medidor nuevo</label>
+            <input type="text" id="nuevoSerial" placeholder="Ej. SM-002">
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="login-btn" style="width:auto;padding:10px 22px;">Crear usuario</button>
+      <div class="login-error" id="crearUsuarioError"></div>
+      <div class="form-ok" id="crearUsuarioOk"></div>
+    </form>
+  </div>
+
+  <!-- Lista de usuarios registrados (visible para administrador y supervisor, solo lectura) -->
+  <div class="section hidden" id="usuariosSection">
+    <div class="section-head"><h2>Usuarios registrados</h2></div>
+    <table>
+      <thead>
+        <tr><th>Username</th><th>Rol</th><th>Vivienda</th><th>Medidor</th><th>Creado</th></tr>
+      </thead>
+      <tbody id="usuariosTableBody">
+        <tr><td colspan="5" class="empty">Cargando usuarios…</td></tr>
+      </tbody>
+    </table>
   </div>
 
 </div>
@@ -678,6 +758,120 @@ async function configurarSelectorDispositivo() {
   } catch (_) { /* si falla, simplemente no se muestra el selector */ }
 }
 
+/* ---------- Panel de administración: crear usuario y listar usuarios ---------- */
+function configurarPanelAdmin() {
+  const esAdmin = sesionActual.rol === 'administrador';
+  const puedeVerUsuarios = sesionActual.rol === 'administrador' || sesionActual.rol === 'supervisor';
+
+  document.getElementById('adminSection').classList.toggle('hidden', !esAdmin);
+  document.getElementById('usuariosSection').classList.toggle('hidden', !puedeVerUsuarios);
+
+  if (esAdmin) refreshViviendasSelect();
+  if (puedeVerUsuarios) refreshUsuariosTabla();
+}
+
+async function refreshViviendasSelect() {
+  try {
+    const viviendas = await apiGet('/viviendas');
+    const select = document.getElementById('viviendaExistente');
+    if (!viviendas.length) {
+      select.innerHTML = '<option value="">No hay viviendas todavía — crea una nueva</option>';
+      return;
+    }
+    select.innerHTML = viviendas.map(v =>
+      `<option value="${v.id}">${v.direccion}${v.serial ? ' — ' + v.serial : ' (sin medidor)'}</option>`
+    ).join('');
+  } catch (err) {
+    if (err.message !== '401') console.error(err);
+  }
+}
+
+async function refreshUsuariosTabla() {
+  try {
+    const usuarios = await apiGet('/usuarios');
+    const body = document.getElementById('usuariosTableBody');
+    if (!usuarios.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty">Aún no hay usuarios registrados.</td></tr>';
+      return;
+    }
+    body.innerHTML = usuarios.map(u => `
+      <tr>
+        <td>${u.username}</td>
+        <td>${u.rol}</td>
+        <td>${u.direccion || '—'}</td>
+        <td>${u.serial || '—'}</td>
+        <td>${timeAgoOrDate(u.creado_en)}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    if (err.message !== '401') console.error(err);
+  }
+}
+
+// Mostrar/ocultar los campos de vivienda según el rol elegido en el formulario
+document.getElementById('nuevoRol').addEventListener('change', (e) => {
+  document.getElementById('viviendaFields').classList.toggle('hidden', e.target.value !== 'usuario');
+});
+
+// Alternar entre "elegir vivienda existente" y "crear vivienda nueva"
+document.getElementById('viviendaModo').addEventListener('change', (e) => {
+  const esNueva = e.target.value === 'nueva';
+  document.getElementById('viviendaExistenteWrap').classList.toggle('hidden', esNueva);
+  document.getElementById('viviendaNuevaWrap').classList.toggle('hidden', !esNueva);
+});
+
+// Crear usuario nuevo — si además pide vivienda nueva, primero la crea (POST /api/viviendas)
+// y con el id que devuelve, crea el usuario (POST /api/usuarios). Todo desde el dashboard,
+// sin tocar SQL a mano.
+document.getElementById('crearUsuarioForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorBox = document.getElementById('crearUsuarioError');
+  const okBox = document.getElementById('crearUsuarioOk');
+  errorBox.textContent = '';
+  okBox.textContent = '';
+
+  const username = document.getElementById('nuevoUsername').value.trim();
+  const password = document.getElementById('nuevoPassword').value;
+  const rol = document.getElementById('nuevoRol').value;
+
+  try {
+    let vivienda_id = null;
+
+    if (rol === 'usuario') {
+      const modo = document.getElementById('viviendaModo').value;
+      if (modo === 'nueva') {
+        const direccion = document.getElementById('nuevaDireccion').value.trim();
+        const serial = document.getElementById('nuevoSerial').value.trim();
+        if (!direccion || !serial) {
+          errorBox.textContent = 'Falta la dirección o el serial del medidor nuevo.';
+          return;
+        }
+        const nueva = await apiPost('/viviendas', { direccion, serial });
+        vivienda_id = nueva.vivienda_id;
+      } else {
+        vivienda_id = document.getElementById('viviendaExistente').value;
+        if (!vivienda_id) {
+          errorBox.textContent = 'Elige una vivienda existente, o cambia a "crear vivienda nueva".';
+          return;
+        }
+      }
+    }
+
+    await apiPost('/usuarios', { username, password, rol, vivienda_id });
+
+    okBox.textContent = `Usuario "${username}" creado correctamente.`;
+    document.getElementById('crearUsuarioForm').reset();
+    document.getElementById('viviendaFields').classList.remove('hidden');
+    document.getElementById('viviendaNuevaWrap').classList.add('hidden');
+    document.getElementById('viviendaExistenteWrap').classList.remove('hidden');
+
+    refreshUsuariosTabla();
+    refreshViviendasSelect();
+  } catch (err) {
+    errorBox.textContent = err.message || 'No se pudo crear el usuario.';
+  }
+});
+
 /* ---------- Controles ---------- */
 document.getElementById('metricPills').addEventListener('click', (e) => {
   if (!e.target.dataset.metric) return;
@@ -712,6 +906,7 @@ function tick() {
 }
 async function arrancarDashboard() {
   await configurarSelectorDispositivo();
+  configurarPanelAdmin();
   tick();
   refreshChart();
   pollHandle = setInterval(tick, POLL_MS);
