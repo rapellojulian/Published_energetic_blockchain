@@ -205,6 +205,8 @@
   .hash-cell{display:flex;align-items:center;gap:8px;color:var(--text-muted);}
   .copy-btn{background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;padding:2px 7px;border-radius:5px;cursor:pointer;font-family:'Inter',sans-serif;}
   .copy-btn:hover{color:var(--teal);border-color:var(--teal);}
+  .delete-btn{background:none;border:1px solid var(--border);color:var(--red);font-size:11px;padding:3px 9px;border-radius:5px;cursor:pointer;font-family:'Inter',sans-serif;}
+  .delete-btn:hover{background:rgba(225,89,79,0.12);border-color:var(--red);}
   .state-ok{color:var(--teal);}
   .state-pending{color:var(--copper);}
 
@@ -418,15 +420,15 @@
     </form>
   </div>
 
-  <!-- Lista de usuarios registrados (visible para administrador y supervisor, solo lectura) -->
+  <!-- Lista de usuarios registrados (visible para administrador y supervisor, solo lectura para supervisor) -->
   <div class="section hidden" id="usuariosSection">
     <div class="section-head"><h2>Usuarios registrados</h2></div>
     <table>
       <thead>
-        <tr><th>Username</th><th>Rol</th><th>Vivienda</th><th>Medidor</th><th>Creado</th></tr>
+        <tr><th>Username</th><th>Rol</th><th>Vivienda</th><th>Medidor</th><th>Creado</th><th id="usuariosAccionesHead"></th></tr>
       </thead>
       <tbody id="usuariosTableBody">
-        <tr><td colspan="5" class="empty">Cargando usuarios…</td></tr>
+        <tr><td colspan="6" class="empty">Cargando usuarios…</td></tr>
       </tbody>
     </table>
   </div>
@@ -485,6 +487,16 @@ async function apiPost(path, body) {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `API ${path} -> ${res.status}`);
+  return data;
+}
+
+async function apiDelete(path) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    credentials: 'include',
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `API ${path} -> ${res.status}`);
@@ -571,28 +583,17 @@ async function refreshLatest() {
     document.getElementById('statVoltage').innerHTML = `${fmt(latest.voltage)}<span class="unit">V</span>`;
     document.getElementById('statCurrent').innerHTML = `${fmt(latest.current, 2)}<span class="unit">A</span>`;
     document.getElementById('statTemp').innerHTML = `${fmt(latest.temperature)}<span class="unit">°C</span>`;
-    // Nota: "Consumo de hoy" (statEnergy) y las tarjetas de mes YA NO se llenan aquí.
-    // latest.energy es el valor crudo de una sola lectura (un total corriendo tipo
-    // odómetro), no el consumo del día — el cálculo correcto (resta dentro del período)
-    // lo hace el servidor en /api/estado y /api/historico-mensual. Ver refreshEstado().
   } catch (err) {
     if (err.message !== '401') { console.error(err); setConnState(false); }
   }
 }
 
-/* ---------- Tarjetas de consumo: hoy, mes actual y mes anterior ----------
-   Estas SÍ vienen calculadas correctamente por el servidor:
-   - /api/estado          -> energia_acumulada (hoy) y consumo_mensual (mes actual)
-   - /api/historico-mensual -> consumo de cada mes por separado, de ahí sacamos "mes anterior"
-*/
+/* ---------- Tarjetas de consumo: hoy, mes actual y mes anterior ---------- */
 async function refreshEstado() {
   try {
     const estados = await apiGet('/estado');
     if (!estados.length) return;
 
-    // ¿Cuál vivienda mostrar? Si hay selector visible (admin/supervisor con
-    // varios medidores), usamos la que esté elegida. Si no, es un usuario
-    // normal y /api/estado ya le devuelve solo la suya.
     const wrap = document.getElementById('deviceSelectWrap');
     let objetivo;
     if (!wrap.classList.contains('hidden')) {
@@ -608,17 +609,15 @@ async function refreshEstado() {
     document.getElementById('statMesActual').innerHTML =
       `${fmt(objetivo.consumo_mensual, 2)}<span class="unit">kWh</span>`;
 
-    // Mes anterior no viene en /api/estado (ese solo trae el mes en curso),
-    // así que lo sacamos del histórico completo, filtrando por este medidor.
     const historico = await apiGet('/historico-mensual');
     const delMedidor = historico
       .filter((h) => h.deviceId === objetivo.serial)
-      .sort((a, b) => new Date(b.mes) - new Date(a.mes)); // más reciente primero
+      .sort((a, b) => new Date(b.mes) - new Date(a.mes));
 
-    const mesAnterior = delMedidor[1]; // [0] = mes actual, [1] = el anterior
+    const mesAnterior = delMedidor[1];
     document.getElementById('statMesAnterior').innerHTML = mesAnterior
       ? `${fmt(mesAnterior.consumo, 2)}<span class="unit">kWh</span>`
-      : `—<span class="unit">kWh</span>`; // todavía no hay un mes anterior completo registrado
+      : `—<span class="unit">kWh</span>`;
   } catch (err) {
     if (err.message !== '401') console.error(err);
   }
@@ -746,7 +745,7 @@ async function refreshChart() {
 async function configurarSelectorDispositivo() {
   const wrap = document.getElementById('deviceSelectWrap');
   if (sesionActual.rol === 'usuario') {
-    wrap.classList.add('hidden'); // el usuario ya ve solo lo suyo, no necesita elegir
+    wrap.classList.add('hidden');
     return;
   }
   try {
@@ -758,7 +757,7 @@ async function configurarSelectorDispositivo() {
   } catch (_) { /* si falla, simplemente no se muestra el selector */ }
 }
 
-/* ---------- Panel de administración: crear usuario y listar usuarios ---------- */
+/* ---------- Panel de administración: crear, listar y eliminar usuarios ---------- */
 function configurarPanelAdmin() {
   const esAdmin = sesionActual.rol === 'administrador';
   const puedeVerUsuarios = sesionActual.rol === 'administrador' || sesionActual.rol === 'supervisor';
@@ -790,8 +789,10 @@ async function refreshUsuariosTabla() {
   try {
     const usuarios = await apiGet('/usuarios');
     const body = document.getElementById('usuariosTableBody');
+    const esAdmin = sesionActual.rol === 'administrador';
+
     if (!usuarios.length) {
-      body.innerHTML = '<tr><td colspan="5" class="empty">Aún no hay usuarios registrados.</td></tr>';
+      body.innerHTML = `<tr><td colspan="${esAdmin ? 6 : 5}" class="empty">Aún no hay usuarios registrados.</td></tr>`;
       return;
     }
     body.innerHTML = usuarios.map(u => `
@@ -801,6 +802,7 @@ async function refreshUsuariosTabla() {
         <td>${u.direccion || '—'}</td>
         <td>${u.serial || '—'}</td>
         <td>${timeAgoOrDate(u.creado_en)}</td>
+        ${esAdmin ? `<td>${u.id === sesionActual.id ? '' : `<button class="delete-btn" data-id="${u.id}" data-username="${u.username}">eliminar</button>`}</td>` : ''}
       </tr>
     `).join('');
   } catch (err) {
@@ -808,21 +810,34 @@ async function refreshUsuariosTabla() {
   }
 }
 
-// Mostrar/ocultar los campos de vivienda según el rol elegido en el formulario
+// Delegación de eventos: los botones "eliminar" se crean dinámicamente,
+// así que escuchamos el clic en la tabla completa y revisamos el origen.
+document.getElementById('usuariosTableBody').addEventListener('click', async (e) => {
+  if (!e.target.classList.contains('delete-btn')) return;
+
+  const id = e.target.dataset.id;
+  const username = e.target.dataset.username;
+
+  if (!confirm(`¿Eliminar al usuario "${username}"? Esta acción no se puede deshacer.`)) return;
+
+  try {
+    await apiDelete(`/usuarios/${id}`);
+    refreshUsuariosTabla();
+  } catch (err) {
+    alert(err.message || 'No se pudo eliminar el usuario.');
+  }
+});
+
 document.getElementById('nuevoRol').addEventListener('change', (e) => {
   document.getElementById('viviendaFields').classList.toggle('hidden', e.target.value !== 'usuario');
 });
 
-// Alternar entre "elegir vivienda existente" y "crear vivienda nueva"
 document.getElementById('viviendaModo').addEventListener('change', (e) => {
   const esNueva = e.target.value === 'nueva';
   document.getElementById('viviendaExistenteWrap').classList.toggle('hidden', esNueva);
   document.getElementById('viviendaNuevaWrap').classList.toggle('hidden', !esNueva);
 });
 
-// Crear usuario nuevo — si además pide vivienda nueva, primero la crea (POST /api/viviendas)
-// y con el id que devuelve, crea el usuario (POST /api/usuarios). Todo desde el dashboard,
-// sin tocar SQL a mano.
 document.getElementById('crearUsuarioForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const errorBox = document.getElementById('crearUsuarioError');
@@ -889,9 +904,6 @@ document.getElementById('rangePills').addEventListener('click', (e) => {
   refreshChart();
 });
 
-// Cuando el admin/supervisor cambia de vivienda en el desplegable,
-// solo las tarjetas de consumo (hoy / mes / mes anterior) necesitan
-// refrescarse con los datos de esa vivienda.
 document.getElementById('deviceSelect').addEventListener('change', () => {
   refreshEstado();
 });
