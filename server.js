@@ -192,6 +192,37 @@ app.post("/api/usuarios", requireAuth, requireRole(["administrador"]), async (re
   }
 });
 
+// Eliminar un usuario (solo el admin puede hacerlo)
+app.delete("/api/usuarios/:id", requireAuth, requireRole(["administrador"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (Number(id) === req.session.usuario.id) {
+      return res.status(400).json({ error: "No puedes eliminar tu propio usuario mientras tienes la sesión activa" });
+    }
+
+    const { rows } = await poolRelacional.query(
+      "DELETE FROM usuarios WHERE id = $1 RETURNING username",
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Ese usuario no existe" });
+    }
+
+    res.json({ ok: true, eliminado: rows[0].username });
+  } catch (err) {
+    if (err.code === "23503") {
+      // Este usuario aparece como "creado_por" de algún otro usuario — no se puede
+      // borrar sin romper esa referencia. En la práctica no debería pasar con tus
+      // 3 usuarios de prueba, pero por seguridad avisamos en vez de fallar en seco.
+      return res.status(409).json({ error: "No se puede eliminar: este usuario registró a otros usuarios" });
+    }
+    console.error("Error en DELETE /api/usuarios/:id:", err);
+    res.status(500).json({ error: "Error al eliminar el usuario" });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════
 // VIVIENDAS (solo administrador) — usadas por el panel "Crear usuario"
 // del dashboard, para no depender de SQL manual en Neon.
